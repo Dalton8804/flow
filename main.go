@@ -138,7 +138,6 @@ func createWatchers(directory string, watcher *fsnotify.Watcher) error {
 			return err
 		}
 		if info.IsDir() {
-			// Add the directory to the watcher
 			toIgnore, _ := loadFlowIgnore()
 			for _, ignore := range toIgnore {
 				if strings.HasPrefix(path, ignore) {
@@ -169,7 +168,6 @@ func receiveChanges(directory string, conn net.Conn) {
 	}
 }
 
-// TODO: Send file to relay server
 func sendFile(conn net.Conn, filename string) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -202,7 +200,7 @@ func sendFile(conn net.Conn, filename string) {
 			return
 		}
 	}
-	fmt.Printf("sent %s successfully", filename)
+	fmt.Printf("sent %s successfully\n", filename)
 }
 
 func loadFlowIgnore() ([]string, error) {
