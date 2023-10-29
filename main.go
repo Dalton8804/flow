@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/fsnotify/fsnotify"
@@ -99,7 +102,7 @@ func monitorDirectory(directory string, conn net.Conn) {
 	}
 	defer watcher.Close()
 
-	err = watcher.Add(directory)
+	err = createWatchers(directory, watcher)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -129,6 +132,30 @@ func monitorDirectory(directory string, conn net.Conn) {
 	}
 }
 
+func createWatchers(directory string, watcher *fsnotify.Watcher) error {
+	err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			// Add the directory to the watcher
+			toIgnore, _ := loadFlowIgnore()
+			for _, ignore := range toIgnore {
+				if strings.HasPrefix(path, ignore) {
+					return nil
+				}
+			}
+			fmt.Println("Adding directory:", path)
+			if err := watcher.Add(path); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return err
+}
+
+// TODO: Receive changes should replace files
 func receiveChanges(directory string, conn net.Conn) {
 	for {
 		buf := make([]byte, 1024)
@@ -142,45 +169,60 @@ func receiveChanges(directory string, conn net.Conn) {
 	}
 }
 
+// TODO: Send file to relay server
 func sendFile(conn net.Conn, filename string) {
-	conn.Write([]byte(filename))
-	// file, err := os.Open(filename)
-	// if err != nil {
-	// 	fmt.Println("Error opening file:", err)
-	// 	return
-	// }
-	// defer file.Close()
+	file, err := os.Open(filename)
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return
+	}
+	defer file.Close()
 
-	// fileInfo, err := file.Stat()
-	// if err != nil {
-	// 	fmt.Println("Error getting file info:", err)
-	// 	return
-	// }
+	_, err = file.Stat()
+	if err != nil {
+		fmt.Println("Error getting file info:", err)
+		return
+	}
 
-	// fileSize := pad(fmt.Sprintf("%d", fileInfo.Size()), 10)
+	_, err = conn.Write([]byte(filename))
+	if err != nil {
+		fmt.Println("Error sending file name:", err)
+		return
+	}
 
-	// _, err = conn.Write([]byte(fileSize))
-	// if err != nil {
-	// 	fmt.Println("Error sending file size:", err)
-	// 	return
-	// }
+	buf := make([]byte, 1024)
+	for {
+		n, err := file.Read(buf)
+		if err != nil {
+			break
+		}
+		_, err = conn.Write(buf[:n])
+		if err != nil {
+			fmt.Println("Error sending file:", err)
+			return
+		}
+	}
+	fmt.Printf("sent %s successfully", filename)
+}
 
-	// _, err = conn.Write([]byte(filename))
-	// if err != nil {
-	// 	fmt.Println("Error sending file name:", err)
-	// 	return
-	// }
+func loadFlowIgnore() ([]string, error) {
+	file, err := os.Open(".flowignore")
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 
-	// buf := make([]byte, 1024)
-	// for {
-	// 	n, err := file.Read(buf)
-	// 	if err != nil {
-	// 		break
-	// 	}
-	// 	_, err = conn.Write(buf[:n])
-	// 	if err != nil {
-	// 		fmt.Println("Error sending file:", err)
-	// 		return
-	// 	}
-	// }
+	var lines []string
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		lines = append(lines, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return lines, nil
 }
